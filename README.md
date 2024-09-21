@@ -1,2 +1,2 @@
 
-## Build a basic version of PayTM
+## Application similar to Paytm - Prototype
