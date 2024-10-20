@@ -3,30 +3,38 @@ const router = Router();
 const { User, Account } = require('../db/index');
 const zod = require('zod');
 const { JWT_SECRET } = require('../config');
+const jwt = require('jsonwebtoken');
 const { authMiddleware } = require('../middleware');
 const { default: mongoose } = require('mongoose');
 
 
 // Only routes linked to user!.
 
+// Get all users based on some query params
 router.get('/bulk', authMiddleware, async (req, res) => {
-    const filters = req.query.filters;
+    const filters = req.query.filters || "";
     const users = await User.find({
         $or: [
             {
                 firstName: {
-                    "regex": filters
+                    "$regex": filters
                 }
             },
             {
                 lastName: {
-                    "regex": filters
+                    "$regex": filters
                 }
             }
         ]
     });
+
     return res.json({
-        users
+        users: users.map((user) => ({
+            id: user._id,
+            userName: user.username,
+            firstName: user.firstName,
+            lastName: user.lastName
+        }))
     });
 });
 
@@ -37,6 +45,7 @@ const signUpBody = zod.object({
     lastName: zod.string()
 });
 
+// Sign-up route
 router.post('/signup', async (req, res) => {
     const bodyParse = signUpBody.safeParse(req.body);
     if (!bodyParse.success) {
@@ -44,43 +53,53 @@ router.post('/signup', async (req, res) => {
             message: 'Incorrect inputs'
         });
     }
-    // Doing atomic transactions
+    // Doing atomic transactions since we have to create user as well as account simultaneously
     const session = await mongoose.startSession();
     session.startTransaction();
 
-    const { username, password, firstName, lastName } = req.body;
-    const userAlreadyExists = User.findOne({
-        username
-    });
-    if (userAlreadyExists) {
-        return res.status(411).json({
-            message: 'Email is already registered'
+    try {
+        const { username, password, firstName, lastName } = req.body || {};
+        const userAlreadyExists = await User.findOne({
+            username
+        });
+        if (userAlreadyExists) {
+            return res.status(411).json({
+                message: 'Email is already registered'
+            });
+        }
+
+        const [user] = await User.create([{
+            username,
+            password,
+            firstName,
+            lastName,
+        }], { session });
+
+        const [account] = await Account.create([{
+            userId: user._id,
+            balance: Math.floor(Math.random() * 10000) + 1,
+        }], { session });
+
+        const token = jwt.sign({
+            userId: user._id,
+        }, JWT_SECRET);
+
+        // Commit the transaction and end the session: If one process fails then everything gets rolls back
+        await session.commitTransaction();
+        await session.endSession();
+
+        return res.status(200).json({
+            message: 'User created successfully',
+            authToken: token
+        });
+    } catch (err) {
+        await session.abortTransaction();
+        await session.endSession();
+
+        return res.status(404).json({
+            message: 'User creation failed',
         });
     }
-    const user = await User.create({
-        username,
-        password,
-        firstName,
-        lastName,
-    }, { session });
-
-    const account = await Account.create({
-        userId: user._id,
-        balance: Math.floor(Math.random() * 10000) + 1,
-    }, { session });
-
-    const token = jwt.sign({
-        userId: user._id,
-    }, JWT_SECRET);
-
-    // Commit the transaction and end the session: If one process fails then everything gets rolls back
-    await session.commitTransaction();
-    await session.endSession();
-
-    res.status(200).json({
-        message: 'User created successfully',
-        authToken: token
-    });
 });
 
 const signInBody = zod.object({
@@ -88,6 +107,7 @@ const signInBody = zod.object({
     password: zod.string()
 });
 
+// Sign in route
 router.post('/signin', async (req, res) => {
     const bodyParse = signInBody.safeParse(req.body);
     if (!bodyParse.success) {
@@ -95,6 +115,8 @@ router.post('/signin', async (req, res) => {
             message: 'Incorrect inputs'
         });
     }
+
+    const { username, password } = req.body || {};
 
     const user = await User.findOne({
         username,
@@ -105,12 +127,12 @@ router.post('/signin', async (req, res) => {
         const token = jwt.sign({
             userId: user._id,
         }, JWT_SECRET);
-        res.status(200).json({
+        return res.status(200).json({
             message: 'User logged in successfully',
             token
         });
     }
-    res.status(411).json({
+    return res.status(411).json({
         message: "Error while logging in"
     });
 });
@@ -121,6 +143,7 @@ const updateUserBody = zod.object({
     lastName: zod.string().optional()
 });
 
+// Update user info route
 router.put('/', authMiddleware, async (req, res) => {
     const bodyParse = updateUserBody.safeParse(req.body);
     if (!bodyParse.success) {
@@ -137,3 +160,5 @@ router.put('/', authMiddleware, async (req, res) => {
         message: "Updated successfully"
     });
 });
+
+module.exports = router;

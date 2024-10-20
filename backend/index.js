@@ -2,8 +2,9 @@ const express = require("express");
 const app = express();
 const rootRouter = require('./routes/router');
 const { PORT } = require("./config");
+const cors = require('cors');
 
-// Basic middleware
+// Basic middleware like cors and body parser
 app.use(cors());
 app.use(express.json());
 

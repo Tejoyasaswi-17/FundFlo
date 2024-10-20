@@ -16,13 +16,13 @@ router.get('/balance', authMiddleware, async (req, res) => {
 });
 
 const transferBody = zod.object({
-    to: zod.string().required(),
-    amount: zod.number().positive().required()
+    to: zod.string(),
+    amount: zod.number().positive()
 });
 
 router.post('/transfer', authMiddleware, async (req, res) => {
     const bodyParse = transferBody.safeParse(req.body);
-    const { to, amount } = req.body();
+    const { to, amount } = req.body || {};
     const toUser = await User.findOne({
         _id: to
     });
