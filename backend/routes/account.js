@@ -22,6 +22,11 @@ const transferBody = zod.object({
 
 router.post('/transfer', authMiddleware, async (req, res) => {
     const bodyParse = transferBody.safeParse(req.body);
+    if (!bodyParse.success) {
+        return res.status(411).json({
+            message: "Incorrect inputs"
+        });
+    }
     const { to, amount } = req.body || {};
     const toUser = await User.findOne({
         _id: to
@@ -37,7 +42,7 @@ router.post('/transfer', authMiddleware, async (req, res) => {
     const toAccount = await Account.findOne({
         userId: to
     });
-    if (toAccount.balance < amount) {
+    if (fromAccount.balance < amount) {
         return res.status(400).json({
             message: "Insufficient funds"
         });
@@ -63,17 +68,17 @@ router.post('/transfer', authMiddleware, async (req, res) => {
                 balance: toAccount.balance + amount
             }
         }, { session });
-        session.commitTransaction();
+        await session.commitTransaction();
+        await session.endSession();
         return res.json({
             message: "Transaction successful"
         });
     } catch (err) {
-        session.abortTransaction();
+        await session.abortTransaction();
+        await session.endSession();
         return res.status(404).json({
             message: "Error encountered while transfering funds"
         });
-    } finally {
-        session.endSession();
     }
 });
 
